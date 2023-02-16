@@ -1,0 +1,941 @@
+---
+title: "Home Equity dataset (HMEQ) Project"
+author: "Ogeto"
+date: "2023-02-09"
+output:
+  pdf_document: default
+  html_document: default
+---
+#Home Equity dataset (HMEQ) Project
+
+***Steps taken in this project***
+1. Business understanding
+2. Data understanding
+       2.1 Import Data
+       2.2 Data analysis of the data
+3. Data preparation
+* Model building of each of the following models and will entail;
+    * Specify model
+    * Create workflow
+    * Evaluate model
+4.Logistic regression
+5.Random forest
+6.Boosted tree (XGBoost)
+7.K-nearest neighbor
+8.Neural network  **it didn't work on our dataset**
+9.Compare models
+10.Last evaluation on test set
+
+#1. **Business understanding**
+
+##1.Problem definition
+*About Dataset*
+***Context***
+The consumer credit department of a bank wants to automate the decisionmaking process for approval of home equity lines of credit. To do this, they will follow the recommendations of the Equal Credit Opportunity Act to create an empirically derived and statistically sound credit scoring model. The model will be based on data collected from recent applicants granted credit through the current process of loan underwriting. The model will be built from predictive modeling tools, but the created model must be sufficiently interpretable to provide a reason for any adverse actions (rejections).
+ > Can you predict clients who default on their loans
+ 
+##2.Data
+The dataset used was obtained at this site ("https://www.kaggle.com/code/ajay1735/my-credit-scoring-model/data")
+About this file
+Content
+The Home Equity dataset (HMEQ) contains baseline and loan performance information for 5,960 recent home equity loans. The target (BAD) is a binary variable indicating whether an applicant eventually defaulted or was seriously delinquent. This adverse outcome occurred in 1,189 cases (20%). For each applicant, 12 input variables were recorded.
+
+
+##3.Evaluation
+I used f_meas(F Measure) metric to measure the performance of the models.
+
+##4.Features
+
+
+1. `BAD` : 1 = client defaulted on loan 0 = loan repaid
+2. `LOAN1`: Amount of the loan request
+3. `MORTDUE` :Amount due on existing mortgage
+4. `VALUE` :Value of current property
+5. `REASON`: DebtCon = debt consolidation HomeImp = home improvement
+6. `JOB` :Six occupational categories
+7. `YOJ`:Years at present job
+8. `DEROG`:Number of major derogatory reports
+9. `DELINQ` :Number of delinquent credit lines
+10. `CLAGE` :Age of oldest trade line in months
+11. `NINQ` :Number of recent credit lines
+12. `CLNO` :Number of credit lines
+13. `DEBTINC`: Debt-to-income ratio
+
+
+#2. **Data understanding**
+
+#1.load libraries
+```{r}
+library(tidymodels)
+```
+
+
+#2.1 Import Data
+```{r}
+dataset <- hmeq %>% 
+  select(LOAN,MORTDUE,VALUE,REASON,JOB,YOJ,DEROG,DELINQ,CLAGE,NINQ,CLNO,DEBTINC,BAD) %>%
+           
+            mutate(BAD = factor(BAD))
+glimpse(dataset)
+```
+
+
+
+
+
+
+
+
+#2.2  Data analysis of the data
+In Data Understanding, I will mainly;
+
+1.Format data properly
+2.Missing data
+3.Get an overview about the complete data
+4.Split data into training and test set using stratified sampling
+5.Visualize the data 
+
+#Checking the first 5 rows of our dataset
+```{r}
+library(gt)
+
+dataset %>% 
+  slice_head(n = 5) %>% 
+  gt() # print output using gt
+```
+
+#1. Format data
+I take a look at the data structure and check whether all data formats are correct:
+
+* Numeric variables should be formatted as integers (int) or double precision floating point   numbers (dbl).
+
+* Categorical (nominal and ordinal) variables should usually be formatted as factors (fct) and not characters (chr). Especially, if they don’t have many levels.
+
+```{r}
+glimpse(dataset)
+```
+# names of column
+```{r}
+names_col <- as_tibble(names(hmeq))
+names_col
+```
+
+#explore the data class structure visually
+
+
+```{r}
+library(visdat)
+
+vis_dat(dataset)
+```
+
+# Check the levels of levels of the variable:
+```{r}
+#for REASON
+dataset %>% 
+  count(REASON,
+        sort = TRUE)
+```
+
+```{r}
+# for JOB
+dataset %>% 
+  count(JOB,
+        sort = TRUE)
+```
+#converting character variables to factors  
+```{r}
+# convert all remaining character variables to factors 
+dataset <- 
+  dataset %>% 
+  mutate(across(where(is.character), as.factor))
+```
+#
+```{r}
+glimpse(dataset)
+```
+
+#2.Missing data
+#visualizing missing data
+```{r}
+vis_miss(dataset, sort_miss = TRUE)
+```
+#Viewing missing dataset 
+```{r}
+is.na(dataset) %>% colSums()
+```
+# datatype
+```{r}
+class(dataset)  
+```
+#number of rows and column
+```{r}
+dim(dataset)
+```
+
+
+#3.Get an overview about the complete data
+```{r}
+skimr::skim(dataset)
+```
+
+#A plot of histogram for each numerical attribute as well as correlation coefficients (Pearson is the default)
+```{r}
+library(GGally)
+
+dataset %>% 
+  select(BAD,LOAN,MORTDUE,VALUE, YOJ,DEROG, DELINQ,CLAGE,NINQ, CLNO ,DEBTINC
+    ) %>% 
+  ggscatmat(alpha = 1)
+
+```
+
+#3.Get an overview about the complete data
+
+#A plot of histogram for each numerical attribute and  categorical variables as well as correlation coefficients (Pearson is the default)
+```{r}
+library(GGally)
+
+dataset %>% 
+  select(BAD,LOAN,MORTDUE,VALUE,REASON,JOB,YOJ,DEROG,DELINQ,CLAGE,NINQ,CLNO,DEBTINC
+    ) %>% 
+  ggpairs()
+
+```
+
+
+
+
+#4.Split data into training and test set using stratified sampling
+
+```{r}
+dataset %>% 
+  ggplot(aes(BAD)) +
+  geom_bar() 
+```
+
+```{r}
+# Fix the random numbers by setting the seed 
+# This enables the analysis to be reproducible 
+set.seed(1213)
+
+# Put 3/4 of the data into the training set 
+data_split <- initial_split(dataset, 
+                           prop = 3/4, 
+                           strata = BAD)
+
+# Create dataframes for the two sets:
+train_data <- training(data_split) 
+test_data <- testing(data_split)
+```
+
+#5.Visualize the data 
+
+#Create data copy
+```{r}
+data_explore <- train_data
+```
+
+
+Next, we take a closer look at the relationships between our variables. In particular, we are interested in the relationships between ur dependent variable `BAD` and all other variables. The goal is to identify possible predictor variables which we could use in our models to predict the `BAD`.
+
+#Numerical variables
+
+```{r}
+print_boxplot <- function(.y_var){
+  
+  # convert strings to variable
+  y_var <- sym(.y_var) 
+ 
+  # unquote variables using {{}}
+  data_explore %>% 
+  ggplot(aes(x = BAD, y = {{y_var}},
+             fill = BAD, color = BAD)) + theme_dark()+
+  geom_boxplot(alpha=0.4) 
+  
+}  
+```
+
+#
+```{r}
+y_var <- 
+  data_explore %>% 
+  select(where(is.numeric),-BAD) %>% 
+  variable.names() # obtain name
+```
+#
+```{r}
+library(purrr)
+
+map(y_var, print_boxplot)
+```
+
+
+```{r}
+library(GGally)
+
+dataset %>% 
+  select(BAD,LOAN,MORTDUE,VALUE, YOJ,DEROG, DELINQ,CLAGE,NINQ, CLNO ,DEBTINC
+    ) %>% 
+  ggscatmat(color="BAD", 
+            corMethod = "spearman",
+            alpha=0.2)
+```
+
+
+
+
+```{r}
+data_explore %>%
+  ggplot(aes(BAD, JOB)) + theme_grey()+
+  geom_bin2d() +
+  scale_fill_continuous(type = "viridis") 
+```
+```{r}
+data_explore %>%
+  ggplot(aes(BAD, REASON)) + theme_get()+
+  geom_bin2d() +
+  scale_fill_continuous(type = "viridis") 
+```
+
+
+
+#3 Data preparation
+Data preparation:
+
+1.Handle missing values
+2.Fix or remove outliers
+3.Feature selection
+4.Feature engineering
+5.Feature scaling
+6.Create a validation set
+```{r}
+dataset_rec <-
+  recipe(BAD ~.,
+         data = train_data) %>%
+  step_log(LOAN,
+           MORTDUE,
+           VALUE) %>% 
+   step_impute_mode(REASON,JOB)%>%
+   step_impute_mean(LOAN,MORTDUE,VALUE,YOJ,DEROG,DELINQ,CLAGE,NINQ,CLNO,DEBTINC) %>%
+
+  
+  step_naomit(everything(), skip = TRUE) %>% 
+  step_novel(all_nominal(), -all_outcomes()) %>%
+  step_normalize(all_numeric(), -all_outcomes())%>% 
+                 
+  step_dummy(all_nominal(), -all_outcomes()) %>%
+  step_zv(all_numeric(), -all_outcomes()) %>%
+  step_corr(all_predictors(), threshold = 0.7, method = "spearman") 
+```
+
+
+#
+```{r}
+summary(dataset_rec)
+```
+
+#
+```{r}
+prepped_data <- 
+  dataset_rec %>% # use the recipe object
+  prep() %>% # perform the recipe on training data
+  juice() # extract only the preprocessed dataframe 
+```
+
+#
+```{r}
+glimpse(prepped_data)
+```
+```{r}
+#check missing data
+sum(is.na(prepped_data))
+```
+
+```{r}
+set.seed(1001)
+
+cv_folds <-
+ vfold_cv(train_data, 
+          v = 5, 
+          strata = BAD) 
+
+```
+#
+
+
+
+
+
+#4.*Logistic regression*
+
+#Specify model
+```{r}
+log_spec <- # your model specification
+  logistic_reg() %>%  # model type
+  set_engine(engine = "glm") %>%  # model engine
+  set_mode("classification") # model mode
+
+# Show your model specification
+log_spec
+```
+
+#Creating Workflow
+```{r}
+log_wflow <- # new workflow object
+ workflow() %>% # use workflow function
+ add_recipe(dataset_rec) %>%   # use the new recipe
+ add_model(log_spec)   # add your model spec
+
+# show object
+log_wflow
+```
+```{r}
+log_res <- 
+  log_wflow %>% 
+  fit_resamples(
+    resamples = cv_folds, 
+    metrics = metric_set(
+      recall, precision, f_meas, 
+      accuracy, kap,
+      roc_auc, sens, spec),
+    control = control_resamples(
+      save_pred = TRUE)
+    ) 
+```
+
+
+
+
+
+
+
+#
+```{r}
+# save model coefficients for a fitted model object from a workflow
+
+get_model <- function(x) {
+  pull_workflow_fit(x) %>% tidy()
+}
+
+# same as before with one exception
+log_res_2 <- 
+  log_wflow %>% 
+  fit_resamples(
+    resamples = cv_folds, 
+    metrics = metric_set(
+      recall, precision, f_meas, 
+      accuracy, kap,
+      roc_auc, sens, spec),
+    control = control_resamples(
+      save_pred = TRUE,
+      extract = get_model) # use extract and our new function
+    ) 
+```
+
+
+#Evaluate model
+```{r}
+all_coef <- map_dfr(log_res_2$.extracts, ~ .x[[1]][[1]])
+```
+
+#
+```{r}
+filter(all_coef, term == "DEROG")
+```
+
+#Performance metrics
+##Show average performance over all folds
+```{r}
+log_res %>%  collect_metrics(summarize = TRUE)
+```
+
+##Show performance for every single fold:
+
+
+```{r}
+log_res %>%  collect_metrics(summarize = FALSE)
+
+```
+
+#Collect predictions
+
+```{r}
+#our prediction saved as log_pred
+log_pred <- 
+  log_res %>%
+  #function to collect obtain the actual model predictions
+  collect_predictions()
+```
+
+##Confusion matrix
+```{r}
+log_pred %>% 
+  conf_mat(BAD, .pred_class) 
+```
+##A quick visualizion of  our confusion matrix
+```{r}
+log_pred %>% 
+  conf_mat(BAD, .pred_class) %>% 
+  autoplot(type = "mosaic")
+```
+
+## Heatmap of our confusion matrix
+```{r}
+log_pred %>% 
+  conf_mat(BAD, .pred_class) %>% 
+  autoplot(type = "heatmap")
+```
+```{r}
+head(log_pred)
+```
+
+##ROC-Curve
+ROC curve for our 5 folds
+```{r}
+log_pred %>% 
+  group_by(id) %>% # id contains our folds
+  roc_curve(BAD, .pred_0) %>% 
+  autoplot()
+```
+
+#Probability distributions
+Plot predicted probability distributions for our two classes.
+```{r}
+log_pred %>% 
+  ggplot() +
+  geom_density(aes(x = .pred_0, 
+                   fill = BAD), 
+               alpha = 0.5)
+```
+
+
+
+#5. Random forest
+
+##Specify models
+```{r}
+library(ranger)
+
+rf_spec <- 
+  rand_forest() %>% 
+  set_engine("ranger", importance = "impurity") %>% 
+  set_mode("classification")
+```
+
+
+##Bundle recipe and model:
+```{r}
+rf_wflow <-
+ workflow() %>%
+ add_recipe(dataset_rec) %>% 
+ add_model(rf_spec) 
+```
+
+##performance metrics.
+```{r}
+rf_res <-
+  rf_wflow %>% 
+  fit_resamples(
+    resamples = cv_folds, 
+    metrics = metric_set(
+      recall, precision, f_meas, 
+      accuracy, kap,
+      roc_auc, sens, spec),
+    control = control_resamples(save_pred = TRUE)
+    ) 
+
+rf_res %>%  collect_metrics(summarize = TRUE)
+```
+
+
+##Model coefficients
+```{r}
+# save model coefficients for a fitted model object from a workflow
+
+get_model <- function(x) {
+  pull_workflow_fit(x) %>% tidy()
+}
+
+# same as before with one exception
+rf_res_2 <- 
+  rf_wflow %>% 
+  fit_resamples(
+    resamples = cv_folds, 
+    metrics = metric_set(
+      recall, precision, f_meas, 
+      accuracy, kap,
+      roc_auc, sens, spec),
+    control = control_resamples(
+      save_pred = TRUE,
+      extract = get_model) # use extract and our new function
+    )
+```
+
+##Performance metrics
+
+
+###Show average performance over all folds
+```{r}
+rf_res %>%  collect_metrics(summarize = TRUE)
+```
+
+
+###Show performance for every single fold:
+```{r}
+rf_res %>%  collect_metrics(summarize = FALSE)
+```
+
+####Collect predictions
+
+```{r}
+rf_pred <- 
+  rf_res %>%
+  collect_predictions()
+```
+
+####Confusion matrix
+```{r}
+rf_pred %>% 
+  conf_mat(BAD, .pred_class) 
+```
+
+###Quick visualization confusion matrix
+```{r}
+rf_pred %>% 
+  conf_mat(BAD, .pred_class) %>% 
+  autoplot(type = "mosaic")
+```
+####Confusion matrix Heatmap
+```{r}
+rf_pred %>% 
+  conf_mat(BAD, .pred_class) %>% 
+  autoplot(type = "heatmap")
+```
+###ROC-Curve
+ROC curve for our 5 folds
+```{r}
+rf_pred %>% 
+  group_by(id) %>% # id contains our folds
+  roc_curve(BAD, .pred_0) %>% 
+  autoplot()
+```
+
+###Probability distributions
+```{r}
+rf_pred %>% 
+  ggplot() +
+  geom_density(aes(x = .pred_0, 
+                   fill = BAD), 
+               alpha = 0.5)
+```
+
+#6:XGBoost
+##Boosted tree (XGBoost)
+#specify model
+```{r}
+library(xgboost)
+
+xgb_spec <- 
+  boost_tree() %>% 
+  set_engine("xgboost") %>% 
+  set_mode("classification") 
+```
+#Bundle recipe and model with workflows:
+```{r}
+xgb_wflow <-
+ workflow() %>%
+ add_recipe(dataset_rec) %>% 
+ add_model(xgb_spec)
+```
+
+
+
+
+#
+```{r}
+xgb_res <- 
+  xgb_wflow %>% 
+  fit_resamples(
+    resamples = cv_folds, 
+    metrics = metric_set(
+      recall, precision, f_meas, 
+      accuracy, kap,
+      roc_auc, sens, spec),
+    control = control_resamples(
+      save_pred = TRUE)
+    ) 
+```
+
+
+##metrics
+```{r}
+xgb_res <- 
+  xgb_wflow %>% 
+  fit_resamples(
+    resamples = cv_folds, 
+    metrics = metric_set(
+      recall, precision, f_meas, 
+      accuracy, kap,
+      roc_auc, sens, spec),
+    control = control_resamples(save_pred = TRUE)
+    ) 
+
+xgb_res %>% collect_metrics(summarize = TRUE)
+```
+
+
+#7:K-nearest neighbor
+
+# Specify model
+```{r}
+knn_spec <- 
+  nearest_neighbor(neighbors = 4) %>% # we can adjust the number of neighbors 
+  set_engine("kknn") %>% 
+  set_mode("classification") 
+```
+
+#Bundle recipe and model with workflows:
+
+```{r}
+knn_wflow <-
+ workflow() %>%
+ add_recipe(dataset_rec) %>% 
+ add_model(knn_spec)
+```
+
+#
+```{r}
+knn_res <- 
+  knn_wflow %>% 
+  fit_resamples(
+    resamples = cv_folds, 
+    metrics = metric_set(
+      recall, precision, f_meas, 
+      accuracy, kap,
+      roc_auc, sens, spec),
+    control = control_resamples(
+      save_pred = TRUE)
+    ) 
+```
+
+#
+```{r}
+knn_res <- 
+  knn_wflow %>% 
+  fit_resamples(
+    resamples = cv_folds, 
+    metrics = metric_set(
+      recall, precision, f_meas, 
+      accuracy, kap,
+      roc_auc, sens, spec),
+    control = control_resamples(save_pred = TRUE)
+    ) 
+
+knn_res %>% collect_metrics(summarize = TRUE)
+```
+
+
+ROC curve for our 5 folds
+```{r}
+rf_pred <- 
+  knn_res %>%
+  collect_predictions()
+
+rf_pred %>% 
+  group_by(id) %>% # id contains our folds
+  roc_curve(BAD, .pred_0) %>% 
+  autoplot
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#8:Neural network
+##Specify model
+**The models failed**
+
+```{r}
+library(keras)
+
+nnet_spec <-
+  mlp() %>%
+  set_mode("classification") %>% 
+  set_engine("keras", verbose = 0) 
+```
+
+#Bundle recipe and model:
+```{r}
+nnet_wflow <-
+ workflow() %>%
+ add_recipe(dataset_rec) %>% 
+ add_model(nnet_spec)
+
+```
+
+#
+```{r}
+ 
+
+```
+
+#
+```{r}
+
+```
+
+
+#9.Compare models
+Extract metrics from our models to compare them:
+
+
+```{r}
+library(forcats) #for fct_reorder function
+log_metrics <- 
+  log_res %>% 
+  collect_metrics(summarise = TRUE) %>%
+  mutate(model = "Logistic Regression") # add the name of the model to every row
+
+rf_metrics <- 
+  rf_res %>% 
+  collect_metrics(summarise = TRUE) %>%
+  mutate(model = "Random Forest")
+
+xgb_metrics <- 
+  xgb_res %>% 
+  collect_metrics(summarise = TRUE) %>%
+  mutate(model = "XGBoost")
+
+knn_metrics <- 
+  knn_res %>% 
+  collect_metrics(summarise = TRUE) %>%
+  mutate(model = "Knn")
+
+# nnet_metrics <- 
+#   nnet_res %>% 
+#   collect_metrics(summarise = TRUE) %>%
+#   mutate(model = "Neural Net")
+
+# create dataframe with all models
+model_compare <- bind_rows(
+                          log_metrics,
+                           rf_metrics,
+                           xgb_metrics,
+                           knn_metrics,
+                         # nnet_metrics
+                           ) 
+
+# change data structure
+model_comp <- 
+  model_compare %>% 
+  select(model, .metric, mean, std_err) %>% 
+  pivot_wider(names_from = .metric, values_from = c(mean, std_err)) 
+ 
+# show mean F1-Score for every model
+model_comp %>% 
+  arrange(mean_f_meas) %>% 
+  mutate(model = fct_reorder(model, mean_f_meas)) %>% # order results
+  ggplot(aes(model, mean_f_meas, fill=model)) +
+  geom_col() +
+  coord_flip() +
+  scale_fill_brewer(palette = "Blues") +
+   geom_text(
+     size = 3,
+     aes(label = round(mean_f_meas, 2), y = mean_f_meas + 0.08),
+     vjust = 1
+  )
+
+```
+`OBSERVATION`:knn model performed best in our train set hence will be used on test set.
+
+```{r}
+# show mean area under the curve (auc) per model
+model_comp %>% 
+  arrange(mean_roc_auc) %>% 
+  mutate(model = fct_reorder(model, mean_roc_auc)) %>%
+  ggplot(aes(model, mean_roc_auc, fill=model)) +
+  geom_col() +
+  coord_flip() +
+  scale_fill_brewer(palette = "Blues") + 
+     geom_text(
+     size = 3,
+     aes(label = round(mean_roc_auc, 2), y = mean_roc_auc + 0.08),
+     vjust = 1
+  )
+```
+ Let’s find the maximum mean F1-Score:
+```{r}
+model_comp %>% slice_max(mean_f_meas)
+
+```
+#10.Last evaluation on test set
+##Knn
+```{r}
+last_fit_Knn <- last_fit(knn_wflow, 
+                        split = data_split,
+                        metrics = metric_set(
+                          recall, precision, f_meas, 
+                          accuracy, kap,
+                          roc_auc, sens, spec)
+                        )
+```
+
+#Show performance metrics
+```{r}
+last_fit_Knn %>% 
+  collect_metrics()
+```
+
+##rf
+```{r}
+last_fit_rf <- last_fit(rf_wflow, 
+                        split = data_split,
+                        metrics = metric_set(
+                          recall, precision, f_meas, 
+                          accuracy, kap,
+                          roc_auc, sens, spec)
+                        )
+```
+
+performance metrics
+```{r}
+last_fit_rf %>% 
+  collect_metrics()
+
+```
+
+# variable importance scores
+```{r}
+library(vip)
+
+last_fit_rf %>% 
+  pluck(".workflow", 1) %>%   
+  pull_workflow_fit() %>% 
+  vip(num_features = 10)
+```
+#confusion matrix for the final model;
+```{r}
+last_fit_Knn %>%
+  collect_predictions() %>% 
+  conf_mat(BAD, .pred_class) %>% 
+  autoplot(type = "heatmap")
+```
+
+```{r}
+last_fit_Knn %>% 
+  collect_predictions() %>% 
+  roc_curve(BAD, .pred_0) %>% 
+  autoplot()
+```
+
+`OBSERVATION`:Based on all of the results, the validation set and test set performance statistics are very close, so we would have pretty high confidence that our **Knn model** with the selected hyperparameters would perform well when predicting new data with **f_meas of 0.9503662**.
